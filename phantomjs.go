@@ -687,6 +687,17 @@ func (p *WebPage) SetProxy(proxy string) error {
 	return p.ref.process.doJSON("POST", "/webpage/SetProxy", req, nil)
 }
 
+// GetLogs returns logs by phantomjs.
+func (p *WebPage) GetLogs() ([]string, error) {
+	var resp struct {
+		Value []string `json:"value"`
+	}
+	if err := p.ref.process.doJSON("POST", "/webpage/GetLogs", map[string]interface{}{"ref": p.ref.id}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Value, nil
+}
+
 // Title returns the title of the web page.
 func (p *WebPage) Title() (string, error) {
 	var resp struct {
@@ -1248,6 +1259,7 @@ server.listen(system.env["PORT"], function(request, response) {
 			case '/webpage/SwitchToMainFrame': return handleWebpageSwitchToMainFrame(request, response);
 			case '/webpage/SwitchToParentFrame': return handleWebpageSwitchToParentFrame(request, response);
 			case '/webpage/UploadFile': return handleWebpageUploadFile(request, response);
+			case '/webpage/GetLogs': return handleWebpageGetLogs(request, response);
 			default: return handleNotFound(request, response);
 		}
 	} catch(e) {
@@ -1260,6 +1272,14 @@ server.listen(system.env["PORT"], function(request, response) {
 function handlePing(request, response) {
 	response.statusCode = 200;
 	response.write('ok');
+	response.closeGracefully();
+}
+
+function handleWebpageGetLogs(request, response) {
+	var id = JSON.parse(request.post).ref;
+	var output = logs[id];
+	logs[id] = [];
+	response.write(JSON.stringify({value: output}));
 	response.closeGracefully();
 }
 
@@ -1318,10 +1338,12 @@ function handleWebpageSetCustomHeaders(request, response) {
 }
 
 function handleWebpageCreate(request, response) {
-	var ref = createRef(webpage.create());
+	var page = webpage.create();
+	var ref = createRef(page);
 	response.statusCode = 200;
 	response.write(JSON.stringify({ref: ref}));
 	response.closeGracefully();
+	subscribeEvents(ref.id, page);
 }
 
 function handleWebpageOpen(request, response) {
@@ -1607,6 +1629,8 @@ function handleWebpageClose(request, response) {
 	page.close();
 	delete(refs, msg.ref);
 
+	unsubscribeEvents(msg.ref, page);
+
 	// Close and dereference owned pages.
 	for (var i = 0; i < page.pages.length; i++) {
 		page.pages[i].close();
@@ -1806,6 +1830,61 @@ function handleNotFound(request, response) {
 	response.closeGracefully();
 }
 
+function log(id, type, msg) {
+	if (!logs[id]) {
+		logs[id] = [];
+	}
+	logs[id].push((new Date()).toISOString() + ' [' + type + '] ' + (msg || ''));
+}
+
+/*
+ * Event handlers
+ */
+function subscribeEvents(id, page) {
+	page.onInitialized = function() {
+		log(id, 'INIT');
+	};
+	page.onError = function(msg, trace) {
+		log(id, 'ERROR', msg);
+	};
+	page.onClose = function(closingPage) {
+		log(id, 'CLOSE', closingPage.url);
+	};
+	page.onLoadFinished = function(status) {
+		log(id, 'LOAD_FIN', status);
+	};
+	page.onLoadStarted = function() {
+		log(id, 'LOAD_START');
+	};
+	page.onResourceError = function(err) {
+		log(id, 'RES_ERROR', JSON.stringify(err));
+	};
+	page.onResourceTimeout = function(err) {
+		log(id, 'RES_TIMEOUT', JSON.stringify(err));
+	};
+	page.onResourceRequested = function(req) {
+		log(id, 'RES_REQ', JSON.stringify(req));
+	};
+	page.onResourceReceived = function(resp) {
+		if (resp.stage == 'end') {
+			log(id, 'RES_RECV', JSON.stringify(resp));
+		}
+	};
+}
+
+function unsubscribeEvents(id, page) {
+	delete page.onError;
+	delete page.onClose;
+	delete page.onLoadFinished;
+	delete page.onLoadStarted;
+	delete page.onResourceError;
+	delete page.onResourceTimeout;
+	delete page.onResourceRequested;
+	delete page.onResourceReceived;
+	if (logs[id]) {
+		delete logs[id];
+	}
+}
 
 /*
  * REFS
@@ -1814,6 +1893,7 @@ function handleNotFound(request, response) {
 // Holds references to remote objects.
 var refID = 0;
 var refs = {};
+var logs = {};
 
 // Adds an object to the reference map and a ref object.
 function createRef(value) {
