@@ -674,6 +674,19 @@ func (p *WebPage) SetSettings(settings WebPageSettings) error {
 	return p.ref.process.doJSON("POST", "/webpage/SetSettings", req, nil)
 }
 
+// SetProxy sets proxy for phantomjs to use on.
+// Proxy string format:
+// [http|socks5]://{host}:{port}
+// Warning: SetProxy invokes an undocumented api in PhantomJs, subject to change
+// in the future.
+func (p *WebPage) SetProxy(proxy string) error {
+	req := map[string]interface{}{
+		"ref":   p.ref.id,
+		"proxy": proxy,
+	}
+	return p.ref.process.doJSON("POST", "/webpage/SetProxy", req, nil)
+}
+
 // Title returns the title of the web page.
 func (p *WebPage) Title() (string, error) {
 	var resp struct {
@@ -1199,6 +1212,7 @@ server.listen(system.env["PORT"], function(request, response) {
 			case '/webpage/SetScrollPosition': return handleWebpageSetScrollPosition(request, response);
 			case '/webpage/Settings': return handleWebpageSettings(request, response);
 			case '/webpage/SetSettings': return handleWebpageSetSettings(request, response);
+			case '/webpage/SetProxy': return handleWebpageSetProxy(request, response);
 			case '/webpage/Title': return handleWebpageTitle(request, response);
 			case '/webpage/URL': return handleWebpageURL(request, response);
 			case '/webpage/ViewportSize': return handleWebpageViewportSize(request, response);
@@ -1501,6 +1515,14 @@ function handleWebpageSetSettings(request, response) {
 	var msg = JSON.parse(request.post);
 	var page = ref(msg.ref);
 	page.settings = msg.settings;
+	response.write(JSON.stringify({}));
+	response.closeGracefully();
+}
+
+function handleWebpageSetProxy(request, response) {
+	var msg = JSON.parse(request.post);
+	var page = ref(msg.ref);
+	page.setProxy(msg.proxy);
 	response.write(JSON.stringify({}));
 	response.closeGracefully();
 }
