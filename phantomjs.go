@@ -48,6 +48,10 @@ type Process struct {
 	// Output from the process.
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// Ignore SSL Error, useful for accessing website with
+	// self-signed certificates. Must be set before Process.Open().
+	IgnoreSSLErrors bool
 }
 
 // NewProcess returns a new instance of Process.
@@ -81,8 +85,13 @@ func (p *Process) Open() error {
 			return err
 		}
 
+		var args []string
+		if p.IgnoreSSLErrors {
+			args = append(args, "--ignore-ssl-errors=yes")
+		}
+		args = append(args, scriptPath)
 		// Start external process.
-		cmd := exec.Command(p.BinPath, scriptPath)
+		cmd := exec.Command(p.BinPath, args...)
 		cmd.Env = []string{fmt.Sprintf("PORT=%d", p.Port)}
 		cmd.Stdout = p.Stdout
 		cmd.Stderr = p.Stderr
